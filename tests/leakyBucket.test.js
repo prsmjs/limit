@@ -174,4 +174,33 @@ describe('leakyBucket', () => {
     expect(() => leakyBucket({ capacity: 5, drainRate: 1, drainInterval: 0 })).toThrow()
     expect(() => leakyBucket({ capacity: -1, drainRate: 1, drainInterval: '1s' })).toThrow()
   })
+
+  it('keys lists touched keys with peek state', async () => {
+    limiter = leakyBucket({ capacity: 10, drainRate: 1, drainInterval: '1m' })
+    await limiter.drip('alpha')
+    await limiter.drip('beta', 3)
+
+    const keys = await limiter.keys()
+    expect(keys.map((k) => k.key).sort()).toEqual(['alpha', 'beta'])
+    expect(keys.find((k) => k.key === 'beta').remaining).toBe(7)
+  })
+
+  it('keys returns empty when nothing touched', async () => {
+    limiter = leakyBucket({ capacity: 10, drainRate: 1, drainInterval: '1m' })
+    expect(await limiter.keys()).toEqual([])
+  })
+
+  it('keys respects the limit option', async () => {
+    limiter = leakyBucket({ capacity: 10, drainRate: 1, drainInterval: '1m' })
+    for (const k of ['a', 'b', 'c', 'd']) await limiter.drip(k)
+    expect(await limiter.keys({ limit: 2 })).toHaveLength(2)
+  })
+
+  it('keys drops a key after reset', async () => {
+    limiter = leakyBucket({ capacity: 10, drainRate: 1, drainInterval: '1m' })
+    await limiter.drip('gone')
+    expect(await limiter.keys()).toHaveLength(1)
+    await limiter.reset('gone')
+    expect(await limiter.keys()).toEqual([])
+  })
 })

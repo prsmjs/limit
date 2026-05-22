@@ -1,5 +1,6 @@
 import { createClient } from 'redis'
 import ms from '@prsm/ms'
+import { scanRecent } from './scanRecent.js'
 
 /**
  * @typedef {Object} TokenBucketOptions
@@ -85,7 +86,7 @@ return {tokens}
 
 /**
  * @param {TokenBucketOptions} options
- * @returns {{ take: (key: string, cost?: number) => Promise<TokenBucketResult>, peek: (key: string) => Promise<{remaining: number}>, reset: (key: string) => Promise<void>, close: () => Promise<void> }}
+ * @returns {{ take: (key: string, cost?: number) => Promise<TokenBucketResult>, peek: (key: string) => Promise<{remaining: number}>, reset: (key: string) => Promise<void>, keys: (options?: {limit?: number, scanCap?: number}) => Promise<Array<object>>, close: () => Promise<void> }}
  */
 export function tokenBucket(options) {
   const { capacity, refillRate } = options
@@ -133,10 +134,15 @@ export function tokenBucket(options) {
     await redis.del(`${prefix}${key}`)
   }
 
+  async function keys(opts) {
+    await readyPromise
+    return scanRecent({ redis, prefix, peek }, opts)
+  }
+
   async function close() {
     await readyPromise.catch(() => {})
     if (redis.isOpen) await redis.quit()
   }
 
-  return { take, peek, reset, close }
+  return { take, peek, reset, keys, close }
 }

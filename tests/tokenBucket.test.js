@@ -168,4 +168,33 @@ describe('tokenBucket', () => {
     expect(() => tokenBucket({ capacity: 5, refillRate: 1, refillInterval: 0 })).toThrow()
     expect(() => tokenBucket({ capacity: -1, refillRate: 1, refillInterval: '1s' })).toThrow()
   })
+
+  it('keys lists touched keys with peek state', async () => {
+    limiter = tokenBucket({ capacity: 10, refillRate: 1, refillInterval: '1m' })
+    await limiter.take('alpha')
+    await limiter.take('beta', 3)
+
+    const keys = await limiter.keys()
+    expect(keys.map((k) => k.key).sort()).toEqual(['alpha', 'beta'])
+    expect(keys.find((k) => k.key === 'beta').remaining).toBe(7)
+  })
+
+  it('keys returns empty when nothing touched', async () => {
+    limiter = tokenBucket({ capacity: 10, refillRate: 1, refillInterval: '1m' })
+    expect(await limiter.keys()).toEqual([])
+  })
+
+  it('keys respects the limit option', async () => {
+    limiter = tokenBucket({ capacity: 10, refillRate: 1, refillInterval: '1m' })
+    for (const k of ['a', 'b', 'c', 'd']) await limiter.take(k)
+    expect(await limiter.keys({ limit: 2 })).toHaveLength(2)
+  })
+
+  it('keys drops a key after reset', async () => {
+    limiter = tokenBucket({ capacity: 10, refillRate: 1, refillInterval: '1m' })
+    await limiter.take('gone')
+    expect(await limiter.keys()).toHaveLength(1)
+    await limiter.reset('gone')
+    expect(await limiter.keys()).toEqual([])
+  })
 })

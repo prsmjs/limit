@@ -189,4 +189,47 @@ describe('slidingWindow', () => {
     await expect(limiter.hit('k1', 1.5)).rejects.toThrow()
     await expect(limiter.hit('k1', 0)).rejects.toThrow()
   })
+
+  it('keys lists touched keys with peek state', async () => {
+    limiter = slidingWindow({ max: 5, window: '1m' })
+    await limiter.hit('alpha')
+    await limiter.hit('beta')
+    await limiter.hit('beta')
+
+    const keys = await limiter.keys()
+    expect(keys.map((k) => k.key).sort()).toEqual(['alpha', 'beta'])
+    const beta = keys.find((k) => k.key === 'beta')
+    expect(beta.total).toBe(2)
+    expect(beta.remaining).toBe(3)
+  })
+
+  it('keys returns empty when nothing touched', async () => {
+    limiter = slidingWindow({ max: 5, window: '1m' })
+    expect(await limiter.keys()).toEqual([])
+  })
+
+  it('keys orders most-recently-touched first', async () => {
+    limiter = slidingWindow({ max: 5, window: '1m' })
+    await limiter.hit('older')
+    await new Promise((r) => setTimeout(r, 20))
+    await limiter.hit('newer')
+
+    const keys = await limiter.keys()
+    expect(keys[0].key).toBe('newer')
+  })
+
+  it('keys respects the limit option', async () => {
+    limiter = slidingWindow({ max: 5, window: '1m' })
+    for (const k of ['a', 'b', 'c', 'd']) await limiter.hit(k)
+    const keys = await limiter.keys({ limit: 2 })
+    expect(keys).toHaveLength(2)
+  })
+
+  it('keys drops a key after reset', async () => {
+    limiter = slidingWindow({ max: 5, window: '1m' })
+    await limiter.hit('gone')
+    expect(await limiter.keys()).toHaveLength(1)
+    await limiter.reset('gone')
+    expect(await limiter.keys()).toEqual([])
+  })
 })

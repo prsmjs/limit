@@ -1,6 +1,7 @@
 import { createClient } from 'redis'
 import { randomUUID } from 'crypto'
 import ms from '@prsm/ms'
+import { scanRecent } from './scanRecent.js'
 
 /**
  * @typedef {Object} SlidingWindowOptions
@@ -63,7 +64,7 @@ return {max - count, count}
 
 /**
  * @param {SlidingWindowOptions} options
- * @returns {{ hit: (key: string, cost?: number) => Promise<SlidingWindowResult>, peek: (key: string) => Promise<{remaining: number, total: number}>, reset: (key: string) => Promise<void>, close: () => Promise<void> }}
+ * @returns {{ hit: (key: string, cost?: number) => Promise<SlidingWindowResult>, peek: (key: string) => Promise<{remaining: number, total: number}>, reset: (key: string) => Promise<void>, keys: (options?: {limit?: number, scanCap?: number}) => Promise<Array<object>>, close: () => Promise<void> }}
  */
 export function slidingWindow(options) {
   const { max } = options
@@ -102,10 +103,15 @@ export function slidingWindow(options) {
     await redis.del(`${prefix}${key}`)
   }
 
+  async function keys(opts) {
+    await readyPromise
+    return scanRecent({ redis, prefix, peek }, opts)
+  }
+
   async function close() {
     await readyPromise.catch(() => {})
     if (redis.isOpen) await redis.quit()
   }
 
-  return { hit, peek, reset, close }
+  return { hit, peek, reset, keys, close }
 }

@@ -1,5 +1,6 @@
 import { createClient } from 'redis'
 import ms from '@prsm/ms'
+import { scanRecent } from './scanRecent.js'
 
 /**
  * @typedef {Object} LeakyBucketOptions
@@ -85,7 +86,7 @@ return {capacity - level}
 
 /**
  * @param {LeakyBucketOptions} options
- * @returns {{ drip: (key: string, cost?: number) => Promise<LeakyBucketResult>, peek: (key: string) => Promise<{remaining: number}>, reset: (key: string) => Promise<void>, close: () => Promise<void> }}
+ * @returns {{ drip: (key: string, cost?: number) => Promise<LeakyBucketResult>, peek: (key: string) => Promise<{remaining: number}>, reset: (key: string) => Promise<void>, keys: (options?: {limit?: number, scanCap?: number}) => Promise<Array<object>>, close: () => Promise<void> }}
  */
 export function leakyBucket(options) {
   const { capacity, drainRate } = options
@@ -133,10 +134,15 @@ export function leakyBucket(options) {
     await redis.del(`${prefix}${key}`)
   }
 
+  async function keys(opts) {
+    await readyPromise
+    return scanRecent({ redis, prefix, peek }, opts)
+  }
+
   async function close() {
     await readyPromise.catch(() => {})
     if (redis.isOpen) await redis.quit()
   }
 
-  return { drip, peek, reset, close }
+  return { drip, peek, reset, keys, close }
 }
