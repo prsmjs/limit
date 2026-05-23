@@ -92,6 +92,7 @@ export function leakyBucket(options) {
   const { capacity, drainRate } = options
   const drainInterval = ms(options.drainInterval)
   const prefix = options.prefix ?? 'limit:lb:'
+  const tracer = options.tracer ?? null
 
   if (!Number.isFinite(capacity) || capacity <= 0) throw new Error('capacity must be a positive number')
   if (!Number.isFinite(drainRate) || drainRate <= 0) throw new Error('drainRate must be a positive number')
@@ -104,7 +105,7 @@ export function leakyBucket(options) {
   redis.on('error', () => {})
   const readyPromise = redis.connect()
 
-  async function drip(key, cost = 1) {
+  async function _drip(key, cost = 1) {
     await readyPromise
     const result = await redis.eval(DRIP_SCRIPT, {
       keys: [`${prefix}${key}`],
@@ -118,6 +119,15 @@ export function leakyBucket(options) {
       ],
     })
     return { allowed: result[0] === 1, remaining: result[1], retryAfter: result[2] }
+  }
+
+  async function drip(key, cost = 1) {
+    if (!tracer) return _drip(key, cost)
+    return tracer.span('limit.leakyBucket.drip', { 'limit.key': key, 'limit.cost': cost }, async (span) => {
+      const r = await _drip(key, cost)
+      span.setAttribute('limit.allowed', r.allowed)
+      return r
+    })
   }
 
   async function peek(key) {

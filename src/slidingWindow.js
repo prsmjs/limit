@@ -70,6 +70,7 @@ export function slidingWindow(options) {
   const { max } = options
   const window = ms(options.window)
   const prefix = options.prefix ?? 'limit:sw:'
+  const tracer = options.tracer ?? null
 
   if (!Number.isInteger(max) || max <= 0) throw new Error('max must be a positive integer')
   if (!Number.isFinite(window) || window <= 0) throw new Error('window must be a positive duration')
@@ -78,7 +79,7 @@ export function slidingWindow(options) {
   redis.on('error', () => {})
   const readyPromise = redis.connect()
 
-  async function hit(key, cost = 1) {
+  async function _hit(key, cost = 1) {
     if (!Number.isInteger(cost) || cost < 1) throw new Error('cost must be a positive integer')
     await readyPromise
     const ids = Array.from({ length: cost }, () => `${Date.now()}-${randomUUID()}`)
@@ -87,6 +88,15 @@ export function slidingWindow(options) {
       arguments: [String(max), String(window), String(Date.now()), String(cost), ...ids],
     })
     return { allowed: result[0] === 1, remaining: result[1], retryAfter: result[2], total: result[3] }
+  }
+
+  async function hit(key, cost = 1) {
+    if (!tracer) return _hit(key, cost)
+    return tracer.span('limit.slidingWindow.hit', { 'limit.key': key, 'limit.cost': cost }, async (span) => {
+      const r = await _hit(key, cost)
+      span.setAttribute('limit.allowed', r.allowed)
+      return r
+    })
   }
 
   async function peek(key) {

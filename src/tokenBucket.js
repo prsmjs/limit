@@ -92,6 +92,7 @@ export function tokenBucket(options) {
   const { capacity, refillRate } = options
   const refillInterval = ms(options.refillInterval)
   const prefix = options.prefix ?? 'limit:tb:'
+  const tracer = options.tracer ?? null
 
   if (!Number.isFinite(capacity) || capacity <= 0) throw new Error('capacity must be a positive number')
   if (!Number.isFinite(refillRate) || refillRate <= 0) throw new Error('refillRate must be a positive number')
@@ -104,7 +105,7 @@ export function tokenBucket(options) {
   redis.on('error', () => {})
   const readyPromise = redis.connect()
 
-  async function take(key, cost = 1) {
+  async function _take(key, cost = 1) {
     await readyPromise
     const result = await redis.eval(TAKE_SCRIPT, {
       keys: [`${prefix}${key}`],
@@ -118,6 +119,15 @@ export function tokenBucket(options) {
       ],
     })
     return { allowed: result[0] === 1, remaining: result[1], retryAfter: result[2] }
+  }
+
+  async function take(key, cost = 1) {
+    if (!tracer) return _take(key, cost)
+    return tracer.span('limit.tokenBucket.take', { 'limit.key': key, 'limit.cost': cost }, async (span) => {
+      const r = await _take(key, cost)
+      span.setAttribute('limit.allowed', r.allowed)
+      return r
+    })
   }
 
   async function peek(key) {
