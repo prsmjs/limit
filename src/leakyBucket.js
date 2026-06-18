@@ -4,18 +4,19 @@ import { scanRecent } from './scanRecent.js'
 
 /**
  * @typedef {Object} LeakyBucketOptions
- * @property {number} capacity - max queued requests before rejection
- * @property {number} drainRate - requests drained per drain interval
- * @property {number|string} drainInterval - time between drains, ms or string like "100ms"
- * @property {{url?: string, host?: string, port?: number, password?: string}} [redis] - redis connection options
- * @property {string} [prefix] - key prefix (default "limit:lb:")
+ * @property {number} capacity - maximum number of requests the bucket can hold before new ones are rejected. This is the backlog tolerance, not a burst allowance.
+ * @property {number} drainRate - number of requests removed from the bucket each drain interval. The sustained throughput is drainRate per drainInterval.
+ * @property {number|string} drainInterval - time between drains, as a duration string ("100ms", "1s") or milliseconds. The bucket drains in whole-interval steps, so a rejected request can wait up to one interval for space.
+ * @property {{url?: string, host?: string, port?: number, password?: string}} [redis] - node-redis connection options passed straight to createClient. Omit to connect to redis on localhost:6379.
+ * @property {string} [prefix] - prefix applied to every Redis key this limiter writes (default "limit:lb:"). Use distinct prefixes to keep separate limiters from colliding on the same Redis instance.
+ * @property {object} [tracer] - optional @prsm/trace tracer. When provided, each drip() call is wrapped in a span recording the key, cost, and allowed result (default none).
  */
 
 /**
  * @typedef {Object} LeakyBucketResult
- * @property {boolean} allowed
- * @property {number} remaining - remaining capacity before rejection
- * @property {number} retryAfter - ms until space is available (0 if allowed)
+ * @property {boolean} allowed - whether the request was admitted into the bucket.
+ * @property {number} remaining - free capacity left in the bucket after this call.
+ * @property {number} retryAfter - milliseconds until the bucket drains enough to admit the request (0 when allowed, -1 when cost exceeds capacity and the request can never succeed).
  */
 
 const DRIP_SCRIPT = `
@@ -85,7 +86,7 @@ return {capacity - level}
 `
 
 /**
- * @param {LeakyBucketOptions} options
+ * @param {LeakyBucketOptions} options - limiter configuration. capacity, drainRate, and drainInterval are required; redis, prefix, and tracer are optional.
  * @returns {{ drip: (key: string, cost?: number) => Promise<LeakyBucketResult>, peek: (key: string) => Promise<{remaining: number}>, reset: (key: string) => Promise<void>, keys: (options?: {limit?: number, scanCap?: number}) => Promise<Array<object>>, close: () => Promise<void> }}
  */
 export function leakyBucket(options) {

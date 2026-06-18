@@ -5,18 +5,19 @@ import { scanRecent } from './scanRecent.js'
 
 /**
  * @typedef {Object} SlidingWindowOptions
- * @property {number} max - max requests per window
- * @property {number|string} window - rolling window size, ms or string like "1m"
- * @property {{url?: string, host?: string, port?: number, password?: string}} [redis] - redis connection options
- * @property {string} [prefix] - key prefix (default "limit:sw:")
+ * @property {number} max - maximum number of requests allowed within any rolling window. Must be a positive integer.
+ * @property {number|string} window - length of the rolling window, as a duration string ("1m", "30s") or milliseconds. The limit is enforced continuously over the trailing window, not reset on fixed boundaries, so there is no burst at the window edge.
+ * @property {{url?: string, host?: string, port?: number, password?: string}} [redis] - node-redis connection options passed straight to createClient. Omit to connect to redis on localhost:6379.
+ * @property {string} [prefix] - prefix applied to every Redis key this limiter writes (default "limit:sw:"). Use distinct prefixes to keep separate limiters from colliding on the same Redis instance.
+ * @property {object} [tracer] - optional @prsm/trace tracer. When provided, each hit() call is wrapped in a span recording the key, cost, and allowed result (default none).
  */
 
 /**
  * @typedef {Object} SlidingWindowResult
- * @property {boolean} allowed
- * @property {number} remaining
- * @property {number} retryAfter - ms until the oldest entry expires (0 if allowed)
- * @property {number} total - current count of requests in the window
+ * @property {boolean} allowed - whether the request was permitted and recorded in the window.
+ * @property {number} remaining - requests still available in the current window after this call.
+ * @property {number} retryAfter - milliseconds until the oldest in-window entry expires and frees a slot (0 when allowed, -1 when cost exceeds max and the request can never succeed).
+ * @property {number} total - number of requests counted in the window, including this one when allowed.
  */
 
 const HIT_SCRIPT = `
@@ -63,7 +64,7 @@ return {max - count, count}
 `
 
 /**
- * @param {SlidingWindowOptions} options
+ * @param {SlidingWindowOptions} options - limiter configuration. max and window are required; redis, prefix, and tracer are optional.
  * @returns {{ hit: (key: string, cost?: number) => Promise<SlidingWindowResult>, peek: (key: string) => Promise<{remaining: number, total: number}>, reset: (key: string) => Promise<void>, keys: (options?: {limit?: number, scanCap?: number}) => Promise<Array<object>>, close: () => Promise<void> }}
  */
 export function slidingWindow(options) {

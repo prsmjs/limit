@@ -4,18 +4,19 @@ import { scanRecent } from './scanRecent.js'
 
 /**
  * @typedef {Object} TokenBucketOptions
- * @property {number} capacity - max tokens in the bucket
- * @property {number} refillRate - tokens added per refill interval
- * @property {number|string} refillInterval - time between refills, ms or string like "1s"
- * @property {{url?: string, host?: string, port?: number, password?: string}} [redis] - redis connection options
- * @property {string} [prefix] - key prefix (default "limit:tb:")
+ * @property {number} capacity - maximum number of tokens the bucket can hold, which is also the largest burst a single key is allowed before it must wait for a refill.
+ * @property {number} refillRate - number of tokens added back to the bucket each refill interval. The sustained allowed rate is refillRate per refillInterval.
+ * @property {number|string} refillInterval - time between refills, as a duration string ("1s", "100ms") or milliseconds. Tokens are credited in whole-interval steps, so a request can wait up to one interval for the next refill.
+ * @property {{url?: string, host?: string, port?: number, password?: string}} [redis] - node-redis connection options passed straight to createClient. Omit to connect to redis on localhost:6379.
+ * @property {string} [prefix] - prefix applied to every Redis key this limiter writes (default "limit:tb:"). Use distinct prefixes to keep separate limiters from colliding on the same Redis instance.
+ * @property {object} [tracer] - optional @prsm/trace tracer. When provided, each take() call is wrapped in a span recording the key, cost, and allowed result (default none).
  */
 
 /**
  * @typedef {Object} TokenBucketResult
- * @property {boolean} allowed
- * @property {number} remaining
- * @property {number} retryAfter - ms until enough tokens are available (0 if allowed)
+ * @property {boolean} allowed - whether the request was permitted and the tokens were consumed.
+ * @property {number} remaining - tokens left in the bucket after this call.
+ * @property {number} retryAfter - milliseconds until enough tokens will have refilled to satisfy the request (0 when allowed, -1 when cost exceeds capacity and the request can never succeed).
  */
 
 const TAKE_SCRIPT = `
@@ -85,7 +86,7 @@ return {tokens}
 `
 
 /**
- * @param {TokenBucketOptions} options
+ * @param {TokenBucketOptions} options - limiter configuration. capacity, refillRate, and refillInterval are required; redis, prefix, and tracer are optional.
  * @returns {{ take: (key: string, cost?: number) => Promise<TokenBucketResult>, peek: (key: string) => Promise<{remaining: number}>, reset: (key: string) => Promise<void>, keys: (options?: {limit?: number, scanCap?: number}) => Promise<Array<object>>, close: () => Promise<void> }}
  */
 export function tokenBucket(options) {

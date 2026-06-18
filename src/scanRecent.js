@@ -7,11 +7,13 @@
  * The SCAN is bounded by scanCap so a limiter holding 100k+ keys does not turn
  * this into an unbounded operation - it returns the most recent of a sample.
  *
- * @param {Object} ctx
- * @param {import('redis').RedisClientType} ctx.redis
- * @param {string} ctx.prefix
- * @param {(key: string) => Promise<object>} ctx.peek
- * @param {{limit?: number, scanCap?: number}} [options]
+ * @param {Object} ctx - limiter internals supplied by the caller.
+ * @param {import('redis').RedisClientType} ctx.redis - connected node-redis client to scan.
+ * @param {string} ctx.prefix - key prefix identifying this limiter's keys, stripped from each returned key.
+ * @param {(key: string) => Promise<object>} ctx.peek - the limiter's peek function, used to read each key's current state without consuming it.
+ * @param {{limit?: number, scanCap?: number}} [options] - listing controls.
+ * @param {number} [options.limit] - maximum number of keys to return, newest first (default 25).
+ * @param {number} [options.scanCap] - upper bound on how many matching keys to SCAN before ranking by recency (default 500). This keeps the operation bounded on limiters holding very large key counts, at the cost of returning the most recent of a sample rather than a true global ordering.
  * @returns {Promise<Array<object>>} recent keys, newest first, each with peek state
  */
 export async function scanRecent({ redis, prefix, peek }, options = {}) {
